@@ -31,22 +31,39 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Verify Android toolchain
+      - name: Prepare stable signing key
+        if: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 }}
         run: |
-          java -version
-          gradle --version
-          test -d "$ANDROID_HOME/ndk/27.2.12479018"
-          test -d "$ANDROID_HOME/platforms/android-35"
+          mkdir -p "$RUNNER_TEMP/synapse-signing"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/synapse-signing/release.jks"
+          test -s "$RUNNER_TEMP/synapse-signing/release.jks"
 
-      - name: Build debug APK
+      - name: Build signed release APK
+        if: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 != '' && secrets.SYNAPSE_KEYSTORE_PASSWORD != '' && secrets.SYNAPSE_KEY_ALIAS != '' && secrets.SYNAPSE_KEY_PASSWORD != '' }}
+        env:
+          SYNAPSE_KEYSTORE_PATH: ${{ runner.temp }}/synapse-signing/release.jks
+          SYNAPSE_KEYSTORE_PASSWORD: ${{ secrets.SYNAPSE_KEYSTORE_PASSWORD }}
+          SYNAPSE_KEY_ALIAS: ${{ secrets.SYNAPSE_KEY_ALIAS }}
+          SYNAPSE_KEY_PASSWORD: ${{ secrets.SYNAPSE_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Build debug APK (temporary fallback)
+        if: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 == '' || secrets.SYNAPSE_KEYSTORE_PASSWORD == '' || secrets.SYNAPSE_KEY_ALIAS == '' || secrets.SYNAPSE_KEY_PASSWORD == '' }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Verify APK output
-        run: |
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload signed release APK
+        if: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 != '' && secrets.SYNAPSE_KEYSTORE_PASSWORD != '' && secrets.SYNAPSE_KEY_ALIAS != '' && secrets.SYNAPSE_KEY_PASSWORD != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SynapseAI-stable-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload APK
+      - name: Upload debug APK (temporary fallback)
+        if: ${{ secrets.SYNAPSE_KEYSTORE_BASE64 == '' || secrets.SYNAPSE_KEYSTORE_PASSWORD == '' || secrets.SYNAPSE_KEY_ALIAS == '' || secrets.SYNAPSE_KEY_PASSWORD == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: SynapseAI-debug-apk
