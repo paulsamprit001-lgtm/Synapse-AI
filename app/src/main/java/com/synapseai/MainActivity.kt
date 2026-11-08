@@ -1,5 +1,8 @@
 package com.synapseai
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -7,9 +10,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -17,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,11 +31,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private val Paper = Color(0xFFF7F5F0)
-private val Ink = Color(0xFF282722)
-private val Muted = Color(0xFF77746C)
-private val Accent = Color(0xFFB66B4D)
-private val Card = Color(0xFFEDEAE3)
+private val LightPaper = Color(0xFFF7F5F0)
+private val LightInk = Color(0xFF282722)
+private val LightMuted = Color(0xFF77746C)
+private val LightAccent = Color(0xFF9A6048)
+private val LightCard = Color(0xFFEDEAE3)
+private val DarkPaper = Color(0xFF151515)
+private val DarkInk = Color(0xFFF1EFEA)
+private val DarkMuted = Color(0xFFAAA69E)
+private val DarkAccent = Color(0xFFC58A70)
+private val DarkCard = Color(0xFF252522)
 
 data class ChatMessage(val text: String, val fromUser: Boolean)
 
@@ -41,29 +51,37 @@ class MainActivity : ComponentActivity() {
     private var modelStatus by mutableStateOf("No model loaded")
     private var busy by mutableStateOf(false)
     private var history by mutableStateOf(listOf<ChatMessage>())
+    private var themeMode by mutableStateOf("system")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = ChatStore(this)
         history = store.load()
+        themeMode = getSharedPreferences("synapse_settings", MODE_PRIVATE)
+            .getString("theme_mode", "system") ?: "system"
         if (history.isEmpty()) history = listOf(
             ChatMessage("Hello. I'm Synapse AI. Import a compatible GGUF model to start private, offline chat.", false)
         )
         setContent {
-            val picker = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument()
-            ) { uri -> if (uri != null) importModel(uri) }
-
-            SynapseScreen(
+            val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) importModel(uri)
+            }
+            SynapseApp(
                 messages = history,
                 modelStatus = modelStatus,
                 busy = busy,
+                themeMode = themeMode,
+                onThemeChange = { mode ->
+                    themeMode = mode
+                    getSharedPreferences("synapse_settings", MODE_PRIVATE).edit()
+                        .putString("theme_mode", mode).apply()
+                },
                 onChooseModel = { picker.launch(arrayOf("*/*")) },
                 onClear = {
                     history = emptyList()
                     store.clear()
                 },
-                onSend = { text -> send(text) }
+                onSend = { send(it) }
             )
         }
     }
@@ -131,71 +149,163 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SynapseScreen(
+private fun SynapseApp(
     messages: List<ChatMessage>,
     modelStatus: String,
     busy: Boolean,
+    themeMode: String,
+    onThemeChange: (String) -> Unit,
     onChooseModel: () -> Unit,
     onClear: () -> Unit,
     onSend: (String) -> Unit
 ) {
     var input by remember { mutableStateOf("") }
-    MaterialTheme(colorScheme = lightColorScheme(
-        background = Paper, surface = Paper, primary = Accent, onBackground = Ink, onSurface = Ink
-    )) {
-        Column(Modifier.fillMaxSize().background(Paper).padding(horizontal = 18.dp)) {
-            Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Synapse", fontSize = 25.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text("A private, on-device assistant", fontSize = 12.sp, color = Muted)
+    var showSettings by remember { mutableStateOf(false) }
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val dark = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
+    val paper = if (dark) DarkPaper else LightPaper
+    val ink = if (dark) DarkInk else LightInk
+    val muted = if (dark) DarkMuted else LightMuted
+    val accent = if (dark) DarkAccent else LightAccent
+    val card = if (dark) DarkCard else LightCard
+    val scheme = if (dark) darkColorScheme(
+        background = paper, surface = paper, primary = accent, onBackground = ink, onSurface = ink
+    ) else lightColorScheme(
+        background = paper, surface = paper, primary = accent, onBackground = ink, onSurface = ink
+    )
+
+    MaterialTheme(colorScheme = scheme) {
+        if (showSettings) {
+            SettingsScreen(
+                themeMode = themeMode,
+                onThemeChange = onThemeChange,
+                paper = paper, ink = ink, muted = muted, card = card,
+                onBack = { showSettings = false }
+            )
+        } else {
+            Column(Modifier.fillMaxSize().background(paper).padding(horizontal = 18.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.size(42.dp).background(accent.copy(alpha = 0.16f), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("S", color = accent, fontWeight = FontWeight.Bold, fontSize = 23.sp) }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Synapse AI", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = ink)
+                        Text("A private, on-device assistant", fontSize = 12.sp, color = muted)
+                    }
+                    TextButton(onClick = onClear, enabled = !busy) { Text("Clear") }
+                    TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 20.sp) }
                 }
-                TextButton(onClick = onClear) { Text("Clear") }
-                Box(Modifier.size(36.dp).background(Color(0xFFE9D8CD), CircleShape), contentAlignment = Alignment.Center) {
-                    Text("S", color = Accent, fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                }
-            }
-            HorizontalDivider(color = Color(0xFFE5E1D9))
-            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("LOCAL MODEL", fontSize = 10.sp, color = Muted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text(modelStatus, fontSize = 11.sp, color = Muted)
-                }
-                OutlinedButton(onClick = onChooseModel, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)) {
-                    Text("Import GGUF", fontSize = 12.sp)
-                }
-            }
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(11.dp),
-                contentPadding = PaddingValues(vertical = 12.dp)
-            ) {
-                items(messages) { msg ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (msg.fromUser) Arrangement.End else Arrangement.Start) {
-                        Column(
-                            Modifier.widthIn(max = 310.dp)
-                                .background(if (msg.fromUser) Color(0xFFECE3D9) else Card, RoundedCornerShape(18.dp))
-                                .padding(horizontal = 15.dp, vertical = 12.dp)
-                        ) {
-                            Text(if (msg.fromUser) "You" else "Synapse", fontSize = 10.sp, color = Muted, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(4.dp))
-                            Text(msg.text, fontSize = 14.sp, lineHeight = 21.sp, color = Ink)
-                        }
+                HorizontalDivider(color = muted.copy(alpha = 0.22f))
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("LOCAL MODEL", fontSize = 10.sp, color = muted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(modelStatus, fontSize = 11.sp, color = muted)
+                    }
+                    OutlinedButton(onClick = onChooseModel, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)) {
+                        Text("Import GGUF", fontSize = 12.sp)
                     }
                 }
-                if (busy) item { Text("Synapse is thinking…", color = Muted, fontSize = 12.sp) }
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(11.dp),
+                    contentPadding = PaddingValues(vertical = 12.dp)
+                ) {
+                    itemsIndexed(messages) { _, msg ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = if (msg.fromUser) Arrangement.End else Arrangement.Start) {
+                            Column(
+                                Modifier.widthIn(max = 310.dp)
+                                    .background(if (msg.fromUser) (if (dark) Color(0xFF34302C) else Color(0xFFECE3D9)) else card, RoundedCornerShape(18.dp))
+                                    .padding(horizontal = 15.dp, vertical = 12.dp)
+                            ) {
+                                Text(if (msg.fromUser) "You" else "Synapse", fontSize = 10.sp, color = muted, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(4.dp))
+                                Text(msg.text, fontSize = 14.sp, lineHeight = 21.sp, color = ink)
+                                if (!msg.fromUser) {
+                                    val context = LocalContext.current
+                                    TextButton(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("Synapse response", msg.text))
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) { Text("Copy", fontSize = 11.sp, color = accent) }
+                                }
+                            }
+                        }
+                    }
+                    if (busy) item { Text("Synapse is thinking…", color = muted, fontSize = 12.sp) }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f),
+                        placeholder = { Text("Message Synapse…", color = muted) },
+                        shape = RoundedCornerShape(22.dp), maxLines = 4, enabled = !busy
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = { val msg = input.trim(); if (msg.isNotEmpty()) { onSend(msg); input = "" } },
+                        enabled = !busy && input.isNotBlank(), shape = CircleShape,
+                        contentPadding = PaddingValues(0.dp), modifier = Modifier.size(52.dp)
+                    ) { Text("↑", fontSize = 22.sp) }
+                }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(
-                    value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message Synapse…", color = Muted) },
-                    shape = RoundedCornerShape(22.dp), maxLines = 4, enabled = !busy
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = { val msg = input.trim(); if (msg.isNotEmpty()) { onSend(msg); input = "" } },
-                    enabled = !busy && input.isNotBlank(), shape = CircleShape,
-                    contentPadding = PaddingValues(0.dp), modifier = Modifier.size(52.dp)
-                ) { Text("↑", fontSize = 22.sp) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    themeMode: String,
+    onThemeChange: (String) -> Unit,
+    paper: Color,
+    ink: Color,
+    muted: Color,
+    card: Color,
+    onBack: () -> Unit
+) {
+    Column(Modifier.fillMaxSize().background(paper).padding(20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← Back") }
+            Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = ink)
+        }
+        Spacer(Modifier.height(26.dp))
+        Text("APPEARANCE", color = muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(Modifier.height(10.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Theme", color = ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Choose how Synapse AI looks", color = muted, fontSize = 12.sp)
+                Spacer(Modifier.height(14.dp))
+                listOf("light" to "Light", "dark" to "Dark", "system" to "System default").forEach { (value, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onThemeChange(value) }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = themeMode == value, onClick = { onThemeChange(value) })
+                        Spacer(Modifier.width(8.dp))
+                        Text(label, color = ink, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("ABOUT", color = muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(Modifier.height(10.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Synapse AI", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("Version 0.3.0 • Offline Android assistant", color = muted, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Text("Your chats and settings stay on this device.", color = muted, fontSize = 12.sp)
             }
         }
     }
