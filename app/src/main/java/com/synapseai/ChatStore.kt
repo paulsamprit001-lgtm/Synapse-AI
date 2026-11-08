@@ -11,16 +11,25 @@ import java.io.File
 class ChatStore(context: Context) {
     private val file = File(context.filesDir, "chat_history.json")
 
-    @Synchronized fun load(): List<ChatMessage> = try {
-        if (!file.exists()) return emptyList()
-        val array = JSONArray(file.readText())
-        (0 until array.length()).map { i ->
-            val item = array.getJSONObject(i)
-            ChatMessage(item.getString("text"), item.getBoolean("user"))
+    @Synchronized
+    fun load(): List<ChatMessage> {
+        return try {
+            if (!file.exists()) {
+                emptyList()
+            } else {
+                val array = JSONArray(file.readText())
+                (0 until array.length()).map { i ->
+                    val item = array.getJSONObject(i)
+                    ChatMessage(item.getString("text"), item.getBoolean("user"))
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
-    } catch (_: Exception) { emptyList() }
+    }
 
-    @Synchronized fun save(messages: List<ChatMessage>) {
+    @Synchronized
+    fun save(messages: List<ChatMessage>) {
         val array = JSONArray()
         messages.takeLast(150).forEach { msg ->
             array.put(JSONObject().put("text", msg.text).put("user", msg.fromUser))
@@ -28,5 +37,8 @@ class ChatStore(context: Context) {
         file.writeText(array.toString())
     }
 
-    @Synchronized fun clear() { if (file.exists()) file.delete() }
+    @Synchronized
+    fun clear() {
+        if (file.exists()) file.delete()
+    }
 }
