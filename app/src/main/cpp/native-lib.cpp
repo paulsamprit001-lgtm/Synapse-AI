@@ -97,7 +97,7 @@ Java_com_synapseai_LocalEngine_generate(JNIEnv *env, jobject, jstring jprompt, j
     std::string output;
     const int limit = std::clamp((int)maxTokens, 1, 256);
     for (int i = 0; i < limit && !g_stop.load(); ++i) {
-        const llama_token token = llama_sampler_sample(sampler, g_ctx, -1);
+        llama_token token = llama_sampler_sample(sampler, g_ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
         char piece[256];
         int n = llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, true);
