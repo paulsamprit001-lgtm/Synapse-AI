@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
             modelStatus = "Saved model found • loading…"
             lifecycleScope.launch {
                 val loaded = withContext(Dispatchers.Default) {
-                    runCatching { engine.loadModel(savedModel.absolutePath, 768, 2) }.getOrDefault(false)
+                    runCatching { engine.loadModel(savedModel.absolutePath, 512, 3) }.getOrDefault(false)
                 }
                 modelStatus = if (loaded) "Model ready • offline" else "Saved model found • reload or check RAM"
             }
@@ -125,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 modelPath = destination.absolutePath
                 modelStatus = "Model copied • loading…"
                 val loaded = withContext(Dispatchers.Default) {
-                    engine.loadModel(destination.absolutePath, 768, 2)
+                    engine.loadModel(destination.absolutePath, 512, 3)
                 }
                 modelStatus = if (loaded) "Model ready • offline" else "Model load failed • check GGUF compatibility/RAM"
             } catch (e: UnsatisfiedLinkError) {
@@ -149,12 +149,14 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val answer = withContext(Dispatchers.Default) {
                 try {
-                    val recent = history.takeLast(10).joinToString("\n") {
-                        if (it.fromUser) "User: ${it.text}" else "Assistant: ${it.text}"
+                    // Short prompts reduce repeated prefill work on low-memory phones.
+                    val recent = history.takeLast(4).joinToString("\n") {
+                        val content = if (it.text.length > 700) it.text.takeLast(700) else it.text
+                        if (it.fromUser) "User: $content" else "Assistant: $content"
                     }
                     engine.generate(
-                        "You are Synapse AI, a helpful assistant. Be clear and concise.\n$recent\nAssistant:",
-                        180
+                        "You are Synapse AI. Answer the latest question directly and concisely.\n$recent\nAssistant:",
+                        96
                     )
                 } catch (e: Exception) {
                     "Generation failed: ${e.message ?: "unknown error"}"
@@ -227,10 +229,17 @@ private fun SynapseApp(
                         Text("Synapse AI", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = ink)
                         Text("A private, on-device assistant", fontSize = 12.sp, color = muted)
                     }
-                    TextButton(onClick = onBackup, enabled = !busy) { Text("Backup") }
-                    TextButton(onClick = onRestore, enabled = !busy) { Text("Restore") }
-                    TextButton(onClick = onClear, enabled = !busy) { Text("Clear") }
-                    TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 20.sp) }
+                    var menuExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { menuExpanded = true }) { Text("⋮", fontSize = 24.sp) }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Backup chats") }, onClick = { menuExpanded = false; onBackup() }, enabled = !busy)
+                            DropdownMenuItem(text = { Text("Restore chats") }, onClick = { menuExpanded = false; onRestore() }, enabled = !busy)
+                            DropdownMenuItem(text = { Text("Clear chat") }, onClick = { menuExpanded = false; onClear() }, enabled = !busy)
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Settings") }, onClick = { menuExpanded = false; showSettings = true })
+                        }
+                    }
                 }
                 HorizontalDivider(color = muted.copy(alpha = 0.22f))
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -331,7 +340,7 @@ private fun SettingsScreen(
         Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("Synapse AI", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                Text("Version 0.3.0 • Offline Android assistant", color = muted, fontSize = 12.sp)
+                Text("Version 0.5.0 • Offline Android assistant", color = muted, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
                 Text("Your chats and settings stay on this device.", color = muted, fontSize = 12.sp)
             }
