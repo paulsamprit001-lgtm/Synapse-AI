@@ -6,12 +6,17 @@ plugins {
 android {
     namespace = "com.synapseai"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
+
     defaultConfig {
         applicationId = "com.synapseai"
         minSdk = 26
         targetSdk = 35
         versionCode = 2
         versionName = "0.2.0"
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
     compileOptions {
