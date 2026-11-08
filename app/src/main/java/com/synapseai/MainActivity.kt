@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -66,6 +67,16 @@ class MainActivity : ComponentActivity() {
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) importModel(uri)
             }
+            val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                if (uri != null) runCatching { store.exportBackup(uri) }
+                    .onSuccess { Toast.makeText(this, "Chat backup exported", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "Backup failed: " + it.message, Toast.LENGTH_LONG).show() }
+            }
+            val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) runCatching { store.importBackup(uri) }
+                    .onSuccess { restored -> history = restored; Toast.makeText(this, "Chat backup restored", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "Restore failed: " + it.message, Toast.LENGTH_LONG).show() }
+            }
             SynapseApp(
                 messages = history,
                 modelStatus = modelStatus,
@@ -76,13 +87,26 @@ class MainActivity : ComponentActivity() {
                     getSharedPreferences("synapse_settings", MODE_PRIVATE).edit()
                         .putString("theme_mode", mode).apply()
                 },
-                onChooseModel = { picker.launch(arrayOf("*/*")) },
+                onChooseModel = { picker.launch(arrayOf("application/octet-stream", "*/*")) },
+                onBackup = { backupPicker.launch("synapse-chat-backup.json") },
+                onRestore = { restorePicker.launch(arrayOf("application/json", "text/*", "*/*")) },
                 onClear = {
                     history = emptyList()
                     store.clear()
                 },
                 onSend = { send(it) }
             )
+        }
+        val savedModel = File(filesDir, "synapse-model.gguf")
+        if (savedModel.isFile && savedModel.length() > 0L) {
+            modelPath = savedModel.absolutePath
+            modelStatus = "Saved model found • loading…"
+            lifecycleScope.launch {
+                val loaded = withContext(Dispatchers.Default) {
+                    runCatching { engine.loadModel(savedModel.absolutePath, 768, 2) }.getOrDefault(false)
+                }
+                modelStatus = if (loaded) "Model ready • offline" else "Saved model found • reload or check RAM"
+            }
         }
     }
 
@@ -156,6 +180,8 @@ private fun SynapseApp(
     themeMode: String,
     onThemeChange: (String) -> Unit,
     onChooseModel: () -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
     onClear: () -> Unit,
     onSend: (String) -> Unit
 ) {
@@ -201,6 +227,8 @@ private fun SynapseApp(
                         Text("Synapse AI", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = ink)
                         Text("A private, on-device assistant", fontSize = 12.sp, color = muted)
                     }
+                    TextButton(onClick = onBackup, enabled = !busy) { Text("Backup") }
+                    TextButton(onClick = onRestore, enabled = !busy) { Text("Restore") }
                     TextButton(onClick = onClear, enabled = !busy) { Text("Clear") }
                     TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 20.sp) }
                 }
